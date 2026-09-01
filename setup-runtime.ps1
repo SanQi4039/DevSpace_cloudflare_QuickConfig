@@ -53,8 +53,8 @@ if ($Force) {
 }
 
 Copy-Item (Join-Path $root 'package.json') (Join-Path $devspaceDir 'package.json') -Force
-Copy-Item (Join-Path $root 'package-lock.json') (Join-Path $devspaceDir 'package-lock.json') -Force
-& (Join-Path $nodeDir 'npm.cmd') ci --omit=dev --no-fund --prefix $devspaceDir
+Remove-Item (Join-Path $devspaceDir 'package-lock.json') -Force -ErrorAction SilentlyContinue
+& (Join-Path $nodeDir 'npm.cmd') install --omit=dev --no-fund --prefix $devspaceDir
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 & (Join-Path $root 'audit-runtime.ps1') `
