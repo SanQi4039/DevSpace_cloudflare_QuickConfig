@@ -29,7 +29,6 @@ foreach ($file in @(
     'setup-runtime.ps1',
     'audit-runtime.ps1',
     'package.json',
-    'package-lock.json',
     'settings.example.json',
     'README.md',
     'LICENSE',
