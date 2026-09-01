@@ -83,6 +83,57 @@ namespace DevSpaceQuickTunnelTray
             }
         }
 
+        public static bool CanUseService(out string error)
+        {
+            error = string.Empty;
+            try
+            {
+                using (var controller = new ServiceController(ServiceName))
+                {
+                    var ignored = controller.Status;
+                    return true;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                error = "未安装 cloudflared Windows Service，或当前用户无法读取该服务。";
+                return false;
+            }
+            catch (Exception exception)
+            {
+                error = "无法读取 cloudflared Windows Service：" + exception.Message;
+                return false;
+            }
+        }
+
+        public static bool IsServiceRunning(out string error)
+        {
+            error = string.Empty;
+            try
+            {
+                using (var controller = new ServiceController(ServiceName))
+                {
+                    controller.Refresh();
+                    if (controller.Status == ServiceControllerStatus.Running)
+                    {
+                        return true;
+                    }
+                    error = "cloudflared Windows Service 当前状态不是 Running：" + TranslateStatus(controller.Status) + "。";
+                    return false;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                error = "未安装 cloudflared Windows Service，或当前用户无法读取该服务。";
+                return false;
+            }
+            catch (Exception exception)
+            {
+                error = "无法读取 cloudflared Windows Service：" + exception.Message;
+                return false;
+            }
+        }
+
         public static int Execute(string action)
         {
             try
@@ -177,7 +228,7 @@ namespace DevSpaceQuickTunnelTray
                 WorkspaceRoot = string.Empty,
                 ToolMode = "minimal",
                 LocalPort = 7676,
-                TunnelMode = "Quick",
+                TunnelMode = string.Empty,
                 FixedHostname = string.Empty,
                 NamedTunnelIdOrName = string.Empty,
                 CredentialsFilePath = string.Empty,
@@ -384,7 +435,7 @@ namespace DevSpaceQuickTunnelTray
             error = string.Empty;
             if (!File.Exists(SettingsPath))
             {
-                error = "首次运行：请选择工作区根目录。";
+                error = "首次运行：请先完成工作区和 Cloudflare Tunnel 配置。所有必填条件满足前不会启动。";
                 return AppSettings.CreateDefault();
             }
 
@@ -451,7 +502,7 @@ namespace DevSpaceQuickTunnelTray
                 !string.Equals(value.TunnelMode, "Named", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(value.TunnelMode, "Service", StringComparison.OrdinalIgnoreCase))
             {
-                error = "Tunnel 模式必须是 Quick、Named 或 Service。";
+                error = "请选择 Tunnel 模式：Quick、Named 或 Service。程序不会默认选择。";
                 return false;
             }
             if (ContainsUnsafeArgumentText(value.WorkspaceRoot) ||
@@ -489,6 +540,15 @@ namespace DevSpaceQuickTunnelTray
                     !File.Exists(value.CloudflaredConfigPath))
                 {
                     error = "cloudflared config 文件不存在。";
+                    return false;
+                }
+            }
+            if (value.IsServiceTunnel)
+            {
+                string serviceError;
+                if (!CloudflaredServiceManager.CanUseService(out serviceError))
+                {
+                    error = serviceError;
                     return false;
                 }
             }
@@ -550,8 +610,76 @@ namespace DevSpaceQuickTunnelTray
             }
         }
 
+        private bool ValidateStartupPrerequisites(out string error)
+        {
+            if (!ValidateSettings(settings, out error))
+            {
+                return false;
+            }
+
+            if (!settings.IsServiceTunnel && !File.Exists(CloudflaredPath))
+            {
+                error = "未找到 cloudflared.exe。请先运行 setup-runtime.ps1，所有运行时条件满足后程序才会启动。";
+                return false;
+            }
+
+            var bundledNodePath = Path.Combine(
+                AppDomain.CurrentDomain.BaseDirectory,
+                "runtime",
+                "node-v22.22.3-win-x64",
+                "node.exe");
+            var systemNodePath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "nodejs",
+                "node.exe");
+            var bundledCliPath = Path.Combine(
+                AppDomain.CurrentDomain.BaseDirectory,
+                "runtime",
+                "devspace",
+                "node_modules",
+                "@waishnav",
+                "devspace",
+                "dist",
+                "cli.js");
+            var globalCliPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "npm",
+                "node_modules",
+                "@waishnav",
+                "devspace",
+                "dist",
+                "cli.js");
+
+            if ((!File.Exists(bundledNodePath) || !File.Exists(bundledCliPath)) &&
+                (!File.Exists(systemNodePath) || !File.Exists(globalCliPath)))
+            {
+                error = "DevSpace 运行时不完整：Node.js 与 DevSpace CLI 必须同时可用。请先运行 setup-runtime.ps1。";
+                return false;
+            }
+
+            if (settings.IsServiceTunnel)
+            {
+                string serviceError;
+                if (!CloudflaredServiceManager.IsServiceRunning(out serviceError))
+                {
+                    error = serviceError + " Service 模式不会先启动 DevSpace；请先启动 cloudflared 服务。";
+                    return false;
+                }
+            }
+
+            error = string.Empty;
+            return true;
+        }
+
         private void StartTunnel()
         {
+            string startupError;
+            if (!ValidateStartupPrerequisites(out startupError))
+            {
+                SetState("启动已阻止", startupError, string.Empty);
+                return;
+            }
+
             namedTunnelStartRequested = false;
             if (settings.HasFixedHostname)
             {
@@ -1528,7 +1656,7 @@ namespace DevSpaceQuickTunnelTray
 
         private void StartCloudflareService()
         {
-            ControlCloudflareService("start", "启动", false, null);
+            ControlCloudflareService("start", "启动", false, RestartTunnel);
         }
 
         private void StopCloudflareService()
@@ -1904,6 +2032,7 @@ namespace DevSpaceQuickTunnelTray
         private readonly Button credentialsBrowseButton;
         private readonly Button configBrowseButton;
         private readonly CheckBox autoStartBox;
+        private readonly Label tunnelGuideLabel;
         private readonly Label validationLabel;
 
         public AppSettings Value { get; private set; }
@@ -1915,7 +2044,7 @@ namespace DevSpaceQuickTunnelTray
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
-            ClientSize = new Size(760, 535);
+            ClientSize = new Size(760, 630);
             Font = new Font("Microsoft YaHei UI", 9F);
 
             workspaceBox = AddTextField("工作区根目录", 20, current.WorkspaceRoot);
@@ -1949,48 +2078,69 @@ namespace DevSpaceQuickTunnelTray
             portBox.Value = Math.Max(1, Math.Min(65535, current.LocalPort));
             Controls.Add(portBox);
 
-            AddLabel("Tunnel 模式", 86, 440);
+            AddLabel("Tunnel 模式（必须选择）", 86, 440);
             tunnelModeBox = new ComboBox();
             tunnelModeBox.Location = new Point(440, 108);
             tunnelModeBox.Size = new Size(220, 25);
             tunnelModeBox.DropDownStyle = ComboBoxStyle.DropDownList;
             tunnelModeBox.Items.AddRange(new object[] { "Quick", "Named", "Service" });
-            tunnelModeBox.SelectedItem = current.IsServiceTunnel
-                ? "Service"
-                : (current.IsNamedTunnel ? "Named" : "Quick");
+            if (current.IsServiceTunnel)
+            {
+                tunnelModeBox.SelectedItem = "Service";
+            }
+            else if (current.IsNamedTunnel)
+            {
+                tunnelModeBox.SelectedItem = "Named";
+            }
+            else if (string.Equals(current.TunnelMode, "Quick", StringComparison.OrdinalIgnoreCase))
+            {
+                tunnelModeBox.SelectedItem = "Quick";
+            }
+            else
+            {
+                tunnelModeBox.SelectedIndex = -1;
+            }
             tunnelModeBox.SelectedIndexChanged += delegate { UpdateNamedControls(); };
             Controls.Add(tunnelModeBox);
 
-            hostnameBox = AddTextField("固定 hostname（不含 https://）", 154, current.FixedHostname);
-            tunnelIdBox = AddTextField("Named Tunnel UUID 或名称", 218, current.NamedTunnelIdOrName);
-            credentialsBox = AddTextField("credentials-file 路径（只保存路径，不读取内容）", 282, current.CredentialsFilePath);
-            credentialsBrowseButton = AddBrowseButton(690, 304, delegate { BrowseFile(credentialsBox, "JSON files (*.json)|*.json|All files (*.*)|*.*"); });
-            configBox = AddTextField("cloudflared config 路径", 346, current.CloudflaredConfigPath);
-            configBrowseButton = AddBrowseButton(690, 368, delegate { BrowseFile(configBox, "YAML files (*.yml;*.yaml)|*.yml;*.yaml|All files (*.*)|*.*"); });
+            tunnelGuideLabel = new Label();
+            tunnelGuideLabel.Location = new Point(20, 143);
+            tunnelGuideLabel.Size = new Size(720, 72);
+            tunnelGuideLabel.BorderStyle = BorderStyle.FixedSingle;
+            tunnelGuideLabel.Padding = new Padding(8, 5, 8, 5);
+            tunnelGuideLabel.ForeColor = Color.DimGray;
+            Controls.Add(tunnelGuideLabel);
+
+            hostnameBox = AddTextField("固定 hostname（不含 https://）", 224, current.FixedHostname);
+            tunnelIdBox = AddTextField("Named Tunnel UUID 或名称", 288, current.NamedTunnelIdOrName);
+            credentialsBox = AddTextField("credentials-file 路径（只保存路径，不读取内容）", 352, current.CredentialsFilePath);
+            credentialsBrowseButton = AddBrowseButton(690, 374, delegate { BrowseFile(credentialsBox, "JSON files (*.json)|*.json|All files (*.*)|*.*"); });
+            configBox = AddTextField("cloudflared config 路径", 416, current.CloudflaredConfigPath);
+            configBrowseButton = AddBrowseButton(690, 438, delegate { BrowseFile(configBox, "YAML files (*.yml;*.yaml)|*.yml;*.yaml|All files (*.*)|*.*"); });
 
             autoStartBox = new CheckBox();
             autoStartBox.Text = "登录 Windows 后自动启动";
-            autoStartBox.Location = new Point(20, 405);
+            autoStartBox.Location = new Point(20, 475);
             autoStartBox.Size = new Size(260, 24);
             autoStartBox.Checked = current.AutoStart;
             Controls.Add(autoStartBox);
 
             validationLabel = new Label();
-            validationLabel.Location = new Point(20, 435);
-            validationLabel.Size = new Size(720, 40);
+            validationLabel.Location = new Point(20, 505);
+            validationLabel.Size = new Size(720, 62);
             validationLabel.ForeColor = Color.Firebrick;
             Controls.Add(validationLabel);
 
             var saveButton = new Button();
             saveButton.Text = "保存";
-            saveButton.Location = new Point(550, 492);
+            saveButton.Location = new Point(550, 586);
             saveButton.Size = new Size(90, 30);
             saveButton.Click += SaveClicked;
             Controls.Add(saveButton);
 
             var cancelButton = new Button();
             cancelButton.Text = "取消";
-            cancelButton.Location = new Point(650, 492);
+            cancelButton.Location = new Point(650, 586);
             cancelButton.Size = new Size(90, 30);
             cancelButton.DialogResult = DialogResult.Cancel;
             Controls.Add(cancelButton);
@@ -2070,6 +2220,23 @@ namespace DevSpaceQuickTunnelTray
             configBox.Enabled = namedEnabled;
             credentialsBrowseButton.Enabled = namedEnabled;
             configBrowseButton.Enabled = namedEnabled;
+
+            if (namedEnabled)
+            {
+                tunnelGuideLabel.Text = "Named：固定域名。必须同时具备 hostname、Tunnel UUID/名称、credentials JSON、cloudflared config YAML、cloudflared.exe 和 DevSpace 运行时；任一条件不满足都会阻止保存或启动。";
+            }
+            else if (string.Equals(mode, "Service", StringComparison.OrdinalIgnoreCase))
+            {
+                tunnelGuideLabel.Text = "Service：固定域名。必须填写 hostname，且 cloudflared Windows Service 必须已安装、可读取并处于 Running；Service 自身负责 UUID/credentials/ingress。任一条件不满足都不会启动 DevSpace。";
+            }
+            else if (string.Equals(mode, "Quick", StringComparison.OrdinalIgnoreCase))
+            {
+                tunnelGuideLabel.Text = "Quick：临时测试模式，不使用自有 UUID/固定域名。必须明确选择，并要求 cloudflared.exe 与 DevSpace 运行时完整；任一条件不满足都不会启动。地址重启后可能变化。";
+            }
+            else
+            {
+                tunnelGuideLabel.Text = "必须明确选择 Tunnel 模式。程序不会默认选择 Quick；当前模式所需条件未全部满足时，保存或启动会被强制阻止。";
+            }
         }
 
         private void SaveClicked(object sender, EventArgs eventArgs)

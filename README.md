@@ -59,13 +59,35 @@ This is substantially larger and should be used only when the target machine can
 ## First run
 
 1. Start `DevSpaceQuickTunnelTray.exe`.
-2. Select the workspace root that DevSpace is allowed to access.
-3. Select `minimal`, `full`, or `codex` tool mode.
-4. Leave Tunnel mode as `Quick` for the simplest setup, or configure Named/Service mode if you already operate a fixed Cloudflare Tunnel.
-5. Copy the displayed MCP URL into ChatGPT.
-6. Copy the Owner password when the MCP authorization page requests it.
+2. Complete the settings dialog. A fresh install has no default Tunnel mode.
+3. Select an existing workspace root, `minimal` / `full` / `codex` tool mode, and a valid local port.
+4. Explicitly select `Quick`, `Named`, or `Service` and satisfy every requirement for that mode.
+5. Only after the full preflight passes will the tray start DevSpace and Cloudflare connectivity.
+6. Copy the displayed MCP URL into ChatGPT.
+7. Copy the Owner password when the MCP authorization page requests it.
 
-Quick Tunnel URLs change after restart. Named/Service mode can keep a fixed hostname.
+### Strict startup gate
+
+Startup is fail-closed. The tray does not partially start DevSpace and then hope the remaining Cloudflare configuration works. If any global or mode-specific prerequisite is missing, the status window reports `启动已阻止` and no DevSpace/tunnel startup is attempted.
+
+Global prerequisites for every mode:
+
+- workspace root exists;
+- tool mode and local port are valid;
+- the DevSpace runtime is complete: Node.js and DevSpace CLI must both be available;
+- a Tunnel mode was explicitly selected.
+
+Mode-specific prerequisites:
+
+| Mode | Required before startup | Notes |
+| --- | --- | --- |
+| `Quick` | `cloudflared.exe` plus all global prerequisites | Temporary test mode only. It deliberately has no user-owned Tunnel UUID or fixed hostname; Cloudflare generates a `trycloudflare.com` URL that can change after restart. |
+| `Named` | fixed hostname, Tunnel UUID/name, existing credentials JSON, existing cloudflared YAML config, `cloudflared.exe`, plus all global prerequisites | Use this when the tray owns the fixed named tunnel process. Missing any field/file blocks saving or startup. |
+| `Service` | fixed hostname, an installed/readable `cloudflared` Windows Service, and that service must be `Running`, plus all global prerequisites | The Windows Service owns its Tunnel UUID, credentials, and ingress/config. If the service is missing or stopped, DevSpace is not started. Starting the service from the tray re-runs the full startup gate. |
+
+If you need a stable Cloudflare domain, use `Named` or `Service`; do not use `Quick`.
+
+For a typical Named Tunnel, Cloudflare must provide a Tunnel UUID/name and a DNS hostname routed to that Tunnel. Enter the hostname without `https://`, select the credentials JSON file, and select a cloudflared YAML config whose ingress target points to the local DevSpace port, for example `http://127.0.0.1:7676`.
 
 ## Build from source
 
