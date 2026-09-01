@@ -66,9 +66,9 @@ jobs:
             'TunnelMode = string.Empty',
             'ValidateStartupPrerequisites',
             'CloudflaredServiceManager.IsServiceRunning',
-            'SetState("启动已阻止"',
-            'ControlCloudflareService("start", "启动", false, RestartTunnel)',
-            '任一条件不满足都不会启动'
+            'if (!ValidateStartupPrerequisites(out startupError))',
+            'ControlCloudflareService("start",',
+            'false, RestartTunnel)'
           )) {
             if (-not $source.Contains($required)) { throw "Strict guard marker missing: $required" }
           }
