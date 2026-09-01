@@ -206,13 +206,18 @@ $new = @'
             namedTunnelStartRequested = false;
 '@
 $source = Replace-Required $source $old $new 'central startup preflight gate'
-
 $source = Replace-Required $source '            ControlCloudflareService("start", "启动", false, null);' '            ControlCloudflareService("start", "启动", false, RestartTunnel);' 'service start resumes blocked startup'
 
-$source = Replace-Required $source '        private readonly CheckBox autoStartBox;`r`n        private readonly Label validationLabel;' '        private readonly CheckBox autoStartBox;`r`n        private readonly Label tunnelGuideLabel;`r`n        private readonly Label validationLabel;' 'settings guide field'
-if ($source -notmatch 'tunnelGuideLabel') {
-    $source = Replace-Required $source "        private readonly CheckBox autoStartBox;`n        private readonly Label validationLabel;" "        private readonly CheckBox autoStartBox;`n        private readonly Label tunnelGuideLabel;`n        private readonly Label validationLabel;" 'settings guide field LF'
-}
+$old = @'
+        private readonly CheckBox autoStartBox;
+        private readonly Label validationLabel;
+'@
+$new = @'
+        private readonly CheckBox autoStartBox;
+        private readonly Label tunnelGuideLabel;
+        private readonly Label validationLabel;
+'@
+$source = Replace-Required $source $old $new 'settings guide field'
 
 $source = Replace-Required $source '            ClientSize = new Size(760, 535);' '            ClientSize = new Size(760, 630);' 'settings dialog height'
 $source = Replace-Required $source '            AddLabel("Tunnel 模式", 86, 440);' '            AddLabel("Tunnel 模式（必须选择）", 86, 440);' 'tunnel mode required label'
