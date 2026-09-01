@@ -21,10 +21,19 @@ jobs:
           ref: ai/tunnel-config-guard-20260901
           fetch-depth: 0
 
-      - name: Preserve edit script and switch to main
+      - name: Preserve UTF-8 edit script and switch to main
         shell: powershell
         run: |
           Copy-Item .cloud-edit.ps1 $env:RUNNER_TEMP\cloud-edit.ps1
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $edit = [System.IO.File]::ReadAllText($env:RUNNER_TEMP + '\cloud-edit.ps1', $utf8)
+          $edit = $edit.Replace('$source = Get-Content $sourcePath -Raw', '$source = [System.IO.File]::ReadAllText($sourcePath, (New-Object System.Text.UTF8Encoding($false)))')
+          $edit = $edit.Replace('Set-Content $sourcePath $source -Encoding UTF8', '[System.IO.File]::WriteAllText($sourcePath, $source, (New-Object System.Text.UTF8Encoding($false)))')
+          $edit = $edit.Replace('$settings = Get-Content $settingsPath -Raw', '$settings = [System.IO.File]::ReadAllText($settingsPath, (New-Object System.Text.UTF8Encoding($false)))')
+          $edit = $edit.Replace('Set-Content $settingsPath $settings -Encoding UTF8', '[System.IO.File]::WriteAllText($settingsPath, $settings, (New-Object System.Text.UTF8Encoding($false)))')
+          $edit = $edit.Replace('$readme = Get-Content $readmePath -Raw', '$readme = [System.IO.File]::ReadAllText($readmePath, (New-Object System.Text.UTF8Encoding($false)))')
+          $edit = $edit.Replace('Set-Content $readmePath $readme -Encoding UTF8', '[System.IO.File]::WriteAllText($readmePath, $readme, (New-Object System.Text.UTF8Encoding($false)))')
+          [System.IO.File]::WriteAllText($env:RUNNER_TEMP + '\cloud-edit.ps1', $edit, $utf8)
           git fetch origin main
           git checkout -B publish origin/main
 
@@ -34,9 +43,10 @@ jobs:
           & $env:RUNNER_TEMP\cloud-edit.ps1
           $utf8 = New-Object System.Text.UTF8Encoding($false)
           foreach ($file in @('DevSpaceQuickTunnelTray.cs','README.md','settings.example.json')) {
-            $text = Get-Content $file -Raw
+            $path = (Resolve-Path $file).Path
+            $text = [System.IO.File]::ReadAllText($path, $utf8)
             $text = $text.TrimEnd("`r", "`n") + "`r`n"
-            [System.IO.File]::WriteAllText((Resolve-Path $file), $text, $utf8)
+            [System.IO.File]::WriteAllText($path, $text, $utf8)
           }
           git diff --check
 
@@ -49,7 +59,8 @@ jobs:
       - name: Verify strict guard content and change boundary
         shell: powershell
         run: |
-          $source = Get-Content .\DevSpaceQuickTunnelTray.cs -Raw
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $source = [System.IO.File]::ReadAllText((Resolve-Path .\DevSpaceQuickTunnelTray.cs).Path, $utf8)
           foreach ($required in @(
             'TunnelMode = string.Empty',
             'ValidateStartupPrerequisites',
