@@ -1,4 +1,4 @@
-name: Create v0.1.0 release
+name: Fix v0.1.0 release notes
 
 on:
   push:
@@ -10,34 +10,23 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  release-notes:
     runs-on: windows-latest
     steps:
-      - name: Check out release source
-        uses: actions/checkout@v4
-        with:
-          ref: 54f501845ff0516832d71e25491ceb9b37b16c23
-
-      - name: Build lightweight package
-        shell: powershell
-        run: .\package-release.ps1 -Version 0.1.0
-
-      - name: Create GitHub Release
+      - name: Update release notes
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $zip = 'dist\DevSpaceQuickTunnelTray-v0.1.0-win-x64.zip'
-          $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash
-          @"
+          @'
           First public release of DevSpace Quick Tunnel Tray.
 
-          This project builds on @waishnav/devspace and adds a lightweight Windows tray launcher plus Cloudflare Tunnel configuration for exposing a local DevSpace MCP endpoint to the ChatGPT web client.
+          This project builds on `@waishnav/devspace` and adds a lightweight Windows tray launcher plus Cloudflare Tunnel configuration for exposing a local DevSpace MCP endpoint to the ChatGPT web client.
 
           ## Download
 
-          - `DevSpaceQuickTunnelTray-v0.1.0-win-x64.zip` — lightweight Windows x64 package
-          - SHA256: `$sha`
+          - `DevSpaceQuickTunnelTray-v0.1.0-win-x64.zip` - lightweight Windows x64 package
+          - SHA256: `dc1b7b48fcb622020e07aa3035e510777e59e6432a47626de0959223adcf2b13`
 
           ## First run
 
@@ -56,5 +45,5 @@ jobs:
           Current audit status: **PASS WITH KNOWN UPSTREAM RISK**. The reviewed findings are in the Pi subagent dependency path, and this release forces `DEVSPACE_SUBAGENTS=0`. See `SECURITY_AUDIT.md` in the package/repository for details.
 
           License: MIT.
-          "@ | Set-Content -Path release-notes.md -Encoding UTF8
-          gh release create v0.1.0 $zip --repo $env:GITHUB_REPOSITORY --target 54f501845ff0516832d71e25491ceb9b37b16c23 --title 'v0.1.0' --notes-file release-notes.md
+          '@ | Set-Content -Path release-notes.md -Encoding UTF8
+          gh release edit v0.1.0 --repo $env:GITHUB_REPOSITORY --title 'v0.1.0' --notes-file release-notes.md
