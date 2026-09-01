@@ -33,7 +33,8 @@ jobs:
           $edit = $edit.Replace('Set-Content $settingsPath $settings -Encoding UTF8', '[System.IO.File]::WriteAllText($settingsPath, $settings, (New-Object System.Text.UTF8Encoding($false)))')
           $edit = $edit.Replace('$readme = Get-Content $readmePath -Raw', '$readme = [System.IO.File]::ReadAllText($readmePath, (New-Object System.Text.UTF8Encoding($false)))')
           $edit = $edit.Replace('Set-Content $readmePath $readme -Encoding UTF8', '[System.IO.File]::WriteAllText($readmePath, $readme, (New-Object System.Text.UTF8Encoding($false)))')
-          [System.IO.File]::WriteAllText($env:RUNNER_TEMP + '\cloud-edit.ps1', $edit, $utf8)
+          $utf8Bom = New-Object System.Text.UTF8Encoding($true)
+          [System.IO.File]::WriteAllText($env:RUNNER_TEMP + '\cloud-edit.ps1', $edit, $utf8Bom)
           git fetch origin main
           git checkout -B publish origin/main
 
