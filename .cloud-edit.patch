@@ -1,0 +1,270 @@
+diff --git a/DevSpaceQuickTunnelTray.cs b/DevSpaceQuickTunnelTray.cs
+index 3872716..0000000 100644
+--- a/DevSpaceQuickTunnelTray.cs
++++ b/DevSpaceQuickTunnelTray.cs
+@@ -78,6 +78,31 @@ namespace DevSpaceQuickTunnelTray
+             }
+         }
+ 
++        public static bool CanUseService(out string error)
++        {
++            error = string.Empty;
++            try
++            {
++                using (var controller = new ServiceController(ServiceName))
++                {
++                    var ignored = controller.Status;
++                    return true;
++                }
++            }
++            catch (InvalidOperationException)
++            {
++                error = "未安装 cloudflared Windows Service，或当前用户无法读取该服务。";
++                return false;
++            }
++            catch (Exception exception)
++            {
++                error = "无法读取 cloudflared Windows Service：" + exception.Message;
++                return false;
++            }
++        }
++
+         public static int Execute(string action)
+         {
+             try
+@@ -168,7 +193,7 @@ namespace DevSpaceQuickTunnelTray
+                 WorkspaceRoot = string.Empty,
+                 ToolMode = "minimal",
+                 LocalPort = 7676,
+-                TunnelMode = "Quick",
++                TunnelMode = string.Empty,
+                 FixedHostname = string.Empty,
+                 NamedTunnelIdOrName = string.Empty,
+                 CredentialsFilePath = string.Empty,
+@@ -393,7 +418,7 @@ namespace DevSpaceQuickTunnelTray
+             error = string.Empty;
+             if (!File.Exists(SettingsPath))
+             {
+-                error = "首次运行：请选择工作区根目录。";
++                error = "首次运行：请先完成工作区和 Cloudflare Tunnel 配置。";
+                 return AppSettings.CreateDefault();
+             }
+ 
+@@ -453,7 +478,7 @@ namespace DevSpaceQuickTunnelTray
+                 !string.Equals(value.TunnelMode, "Service", StringComparison.OrdinalIgnoreCase))
+             {
+-                error = "Tunnel 模式必须是 Quick、Named 或 Service。";
++                error = "请选择 Tunnel 模式：Quick、Named 或 Service。";
+                 return false;
+             }
+             if (ContainsUnsafeArgumentText(value.WorkspaceRoot) ||
+@@ -493,6 +518,16 @@ namespace DevSpaceQuickTunnelTray
+                     return false;
+                 }
+             }
++            if (value.IsServiceTunnel)
++            {
++                string serviceError;
++                if (!CloudflaredServiceManager.CanUseService(out serviceError))
++                {
++                    error = serviceError;
++                    return false;
++                }
++            }
+             return true;
+         }
+ 
+@@ -555,6 +590,13 @@ namespace DevSpaceQuickTunnelTray
+             {
+                 if (settings.IsServiceTunnel)
+                 {
++                    string serviceError;
++                    if (!CloudflaredServiceManager.CanUseService(out serviceError))
++                    {
++                        SetState("Service 模式不可用", serviceError, string.Empty);
++                        return;
++                    }
+                     RefreshCloudflareServiceStatus(true);
+                 }
+                 try
+@@ -1907,6 +1949,7 @@ namespace DevSpaceQuickTunnelTray
+         private readonly Button credentialsBrowseButton;
+         private readonly Button configBrowseButton;
+         private readonly CheckBox autoStartBox;
++        private readonly Label tunnelGuideLabel;
+         private readonly Label validationLabel;
+ 
+         public AppSettings Value { get; private set; }
+@@ -1919,7 +1962,7 @@ namespace DevSpaceQuickTunnelTray
+             FormBorderStyle = FormBorderStyle.FixedDialog;
+             MaximizeBox = false;
+             MinimizeBox = false;
+-            ClientSize = new Size(760, 535);
++            ClientSize = new Size(760, 630);
+             Font = new Font("Microsoft YaHei UI", 9F);
+ 
+             workspaceBox = AddTextField("工作区根目录", 20, current.WorkspaceRoot);
+@@ -1955,7 +1998,7 @@ namespace DevSpaceQuickTunnelTray
+             portBox.Value = Math.Max(1, Math.Min(65535, current.LocalPort));
+             Controls.Add(portBox);
+ 
+-            AddLabel("Tunnel 模式", 86, 440);
++            AddLabel("Tunnel 模式（必须选择）", 86, 440);
+             tunnelModeBox = new ComboBox();
+             tunnelModeBox.Location = new Point(440, 108);
+             tunnelModeBox.Size = new Size(220, 25);
+@@ -1963,36 +2006,54 @@ namespace DevSpaceQuickTunnelTray
+             tunnelModeBox.Items.AddRange(new object[] { "Quick", "Named", "Service" });
+-            tunnelModeBox.SelectedItem = current.IsServiceTunnel
+-                ? "Service"
+-                : (current.IsNamedTunnel ? "Named" : "Quick");
++            if (current.IsServiceTunnel)
++            {
++                tunnelModeBox.SelectedItem = "Service";
++            }
++            else if (current.IsNamedTunnel)
++            {
++                tunnelModeBox.SelectedItem = "Named";
++            }
++            else if (string.Equals(current.TunnelMode, "Quick", StringComparison.OrdinalIgnoreCase))
++            {
++                tunnelModeBox.SelectedItem = "Quick";
++            }
++            else
++            {
++                tunnelModeBox.SelectedIndex = -1;
++            }
+             tunnelModeBox.SelectedIndexChanged += delegate { UpdateNamedControls(); };
+             Controls.Add(tunnelModeBox);
+ 
+-            hostnameBox = AddTextField("固定 hostname（不含 https://）", 154, current.FixedHostname);
+-            tunnelIdBox = AddTextField("Named Tunnel UUID 或名称", 218, current.NamedTunnelIdOrName);
+-            credentialsBox = AddTextField("credentials-file 路径（只保存路径，不读取内容）", 282, current.CredentialsFilePath);
+-            credentialsBrowseButton = AddBrowseButton(690, 304, delegate { BrowseFile(credentialsBox, "JSON files (*.json)|*.json|All files (*.*)|*.*"); });
+-            configBox = AddTextField("cloudflared config 路径", 346, current.CloudflaredConfigPath);
+-            configBrowseButton = AddBrowseButton(690, 368, delegate { BrowseFile(configBox, "YAML files (*.yml;*.yaml)|*.yml;*.yaml|All files (*.*)|*.*"); });
++            tunnelGuideLabel = new Label();
++            tunnelGuideLabel.Location = new Point(20, 143);
++            tunnelGuideLabel.Size = new Size(720, 72);
++            tunnelGuideLabel.BorderStyle = BorderStyle.FixedSingle;
++            tunnelGuideLabel.Padding = new Padding(8, 5, 8, 5);
++            tunnelGuideLabel.ForeColor = Color.DimGray;
++            Controls.Add(tunnelGuideLabel);
++
++            hostnameBox = AddTextField("固定 hostname（不含 https://）", 224, current.FixedHostname);
++            tunnelIdBox = AddTextField("Named Tunnel UUID 或名称", 288, current.NamedTunnelIdOrName);
++            credentialsBox = AddTextField("credentials-file 路径（只保存路径，不读取内容）", 352, current.CredentialsFilePath);
++            credentialsBrowseButton = AddBrowseButton(690, 374, delegate { BrowseFile(credentialsBox, "JSON files (*.json)|*.json|All files (*.*)|*.*"); });
++            configBox = AddTextField("cloudflared config 路径", 416, current.CloudflaredConfigPath);
++            configBrowseButton = AddBrowseButton(690, 438, delegate { BrowseFile(configBox, "YAML files (*.yml;*.yaml)|*.yml;*.yaml|All files (*.*)|*.*"); });
+ 
+             autoStartBox = new CheckBox();
+             autoStartBox.Text = "登录 Windows 后自动启动";
+-            autoStartBox.Location = new Point(20, 405);
++            autoStartBox.Location = new Point(20, 475);
+             autoStartBox.Size = new Size(260, 24);
+             autoStartBox.Checked = current.AutoStart;
+             Controls.Add(autoStartBox);
+ 
+             validationLabel = new Label();
+-            validationLabel.Location = new Point(20, 435);
+-            validationLabel.Size = new Size(720, 40);
++            validationLabel.Location = new Point(20, 505);
++            validationLabel.Size = new Size(720, 62);
+             validationLabel.ForeColor = Color.Firebrick;
+             Controls.Add(validationLabel);
+ 
+             var saveButton = new Button();
+             saveButton.Text = "保存";
+-            saveButton.Location = new Point(550, 492);
++            saveButton.Location = new Point(550, 586);
+             saveButton.Size = new Size(90, 30);
+             saveButton.Click += SaveClicked;
+             Controls.Add(saveButton);
+ 
+             var cancelButton = new Button();
+             cancelButton.Text = "取消";
+-            cancelButton.Location = new Point(650, 492);
++            cancelButton.Location = new Point(650, 586);
+             cancelButton.Size = new Size(90, 30);
+             cancelButton.DialogResult = DialogResult.Cancel;
+             Controls.Add(cancelButton);
+@@ -2076,6 +2137,25 @@ namespace DevSpaceQuickTunnelTray
+             configBox.Enabled = namedEnabled;
+             credentialsBrowseButton.Enabled = namedEnabled;
+             configBrowseButton.Enabled = namedEnabled;
++
++            if (namedEnabled)
++            {
++                tunnelGuideLabel.Text = "Named：固定 Cloudflare 域名模式。必须配置固定 hostname、Tunnel UUID/名称、credentials JSON 和 cloudflared config YAML；缺一项都不会启动。";
++            }
++            else if (string.Equals(mode, "Service", StringComparison.OrdinalIgnoreCase))
++            {
++                tunnelGuideLabel.Text = "Service：使用已安装的 cloudflared Windows Service。托盘中必须填写固定 hostname；Tunnel UUID、credentials 和 ingress/config 应已配置到该 Service，保存时会检查服务是否存在。";
++            }
++            else if (string.Equals(mode, "Quick", StringComparison.OrdinalIgnoreCase))
++            {
++                tunnelGuideLabel.Text = "Quick：仅用于临时测试。无需 UUID 或自有固定域名，Cloudflare 会生成 trycloudflare.com 临时地址，重启后可能变化。需要固定域名时不要选择 Quick。";
++            }
++            else
++            {
++                tunnelGuideLabel.Text = "请选择 Tunnel 模式后再保存。固定 Cloudflare 域名请选择 Named 或 Service；程序不会再默认替你选择 Quick。";
++            }
+         }
+ 
+         private void SaveClicked(object sender, EventArgs eventArgs)
+diff --git a/settings.example.json b/settings.example.json
+index b294ba2..0000000 100644
+--- a/settings.example.json
++++ b/settings.example.json
+@@ -3,7 +3,7 @@
+   "WorkspaceRoot": "C:\\path\\to\\your\\workspace",
+   "ToolMode": "codex",
+   "LocalPort": 7676,
+-  "TunnelMode": "Quick",
++  "TunnelMode": "",
+   "FixedHostname": "",
+   "NamedTunnelIdOrName": "",
+   "CredentialsFilePath": "",
+diff --git a/README.md b/README.md
+index 91f1ae3..0000000 100644
+--- a/README.md
++++ b/README.md
+@@ -56,15 +56,34 @@ Maintainers can generate a self-contained package that already contains Node.js,
+ 
+ ## First run
+ 
+ 1. Start `DevSpaceQuickTunnelTray.exe`.
+-2. Select the workspace root that DevSpace is allowed to access.
+-3. Select `minimal`, `full`, or `codex` tool mode.
+-4. Leave Tunnel mode as `Quick` for the simplest setup, or configure Named/Service mode if you already operate a fixed Cloudflare Tunnel.
+-5. Copy the displayed MCP URL into ChatGPT.
+-6. Copy the Owner password when the MCP authorization page requests it.
++2. Complete the settings dialog. The tray will not start DevSpace or a tunnel until the workspace and Tunnel mode pass validation.
++3. Select the workspace root that DevSpace is allowed to access, the `minimal` / `full` / `codex` tool mode, and the local port.
++4. Explicitly choose one Tunnel mode. There is no longer a silent `Quick` default on a fresh install.
++5. Complete the mode-specific Cloudflare fields described below, then save.
++6. Copy the displayed MCP URL into ChatGPT.
++7. Copy the Owner password when the MCP authorization page requests it.
+ 
+-Quick Tunnel URLs change after restart. Named/Service mode can keep a fixed hostname.
++### Tunnel configuration requirements
++
++| Mode | Required configuration | Intended use |
++| --- | --- | --- |
++| `Quick` | No UUID or user-owned hostname. You must still select the mode explicitly. | Temporary testing only. Cloudflare generates a `trycloudflare.com` URL and it can change after restart. |
++| `Named` | Fixed hostname, Tunnel UUID/name, `credentials-file` JSON path, and cloudflared YAML config path. | Fixed Cloudflare hostname managed by this tray process. |
++| `Service` | Fixed hostname plus an already installed/readable `cloudflared` Windows Service. The service itself must already contain the Tunnel UUID/credentials/ingress configuration. | Fixed hostname when cloudflared is managed independently as a Windows Service. |
++
++If you require a stable Cloudflare domain, use `Named` or `Service`; do not use `Quick`.
++
++For a typical Named Tunnel, the Cloudflare-side pieces are:
++
++1. a Tunnel created in Cloudflare, which provides the Tunnel UUID/name;
++2. a DNS hostname routed to that Tunnel, entered in the tray as the fixed hostname without `https://`;
++3. the Tunnel credentials JSON file;
++4. a cloudflared YAML config whose ingress/service target points to the local DevSpace port, for example `http://127.0.0.1:7676`.
++
++The tray validates these fields before saving. `Named` will not start when its required files are missing. `Service` will not be accepted when the `cloudflared` Windows Service cannot be queried.
+ 
+ ## Build from source
