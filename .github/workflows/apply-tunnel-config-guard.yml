@@ -32,6 +32,12 @@ jobs:
         shell: powershell
         run: |
           & $env:RUNNER_TEMP\cloud-edit.ps1
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          foreach ($file in @('DevSpaceQuickTunnelTray.cs','README.md','settings.example.json')) {
+            $text = Get-Content $file -Raw
+            $text = $text.TrimEnd("`r", "`n") + "`r`n"
+            [System.IO.File]::WriteAllText((Resolve-Path $file), $text, $utf8)
+          }
           git diff --check
 
       - name: Build on GitHub Windows runner
