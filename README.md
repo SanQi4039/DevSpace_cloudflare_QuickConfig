@@ -93,9 +93,9 @@ Both modes include the C# source, setup/release scripts, dependency download ref
 
 ## Dependency policy
 
-The Git repository commits the small audited `package-lock.json`, but does not commit Node.js, cloudflared, `node_modules`, or any extracted runtime. `setup-runtime.ps1` copies `package.json` plus the lockfile into the local runtime directory and uses `npm ci`, so online and offline installs resolve the same dependency tree that was audited.
+The Git repository pins `@waishnav/devspace` to the exact version `1.0.8`, but does not commit Node.js, cloudflared, `node_modules`, an extracted runtime, or a large transitive lockfile. `setup-runtime.ps1` installs that exact DevSpace version into the local runtime, generates a local lockfile, and immediately runs `audit-runtime.ps1`.
 
-This keeps the repository small without sacrificing reproducibility. Updating DevSpace or any locked transitive dependency requires regenerating the lockfile and rerunning `audit-runtime.ps1`.
+This keeps the repository small while retaining a fail-closed security gate: audited core dependency version drift, new advisories, or any critical finding blocks setup. Updating DevSpace requires updating the pinned version and rerunning the runtime/security checks.
 
 See [DOWNLOADS.md](DOWNLOADS.md) for direct official dependency URLs and checksums.
 
