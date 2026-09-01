@@ -1,0 +1,20 @@
+# Per-machine state
+settings.json
+*.log
+*.log.1
+*.tmp
+
+# Build and release output
+*.exe
+*.pdb
+dist/
+.release-cache/
+
+# Dependencies downloaded by setup-runtime.ps1
+runtime/
+cloudflared.exe
+
+# IDE artifacts
+.vs/
+bin/
+obj/
