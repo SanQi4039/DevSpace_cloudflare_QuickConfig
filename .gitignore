@@ -13,6 +13,7 @@ dist/
 # Dependencies downloaded by setup-runtime.ps1
 runtime/
 cloudflared.exe
+package-lock.json
 
 # IDE artifacts
 .vs/
