@@ -1,0 +1,60 @@
+name: Create v0.1.0 release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release-v0.1.0.yml
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: 54f501845ff0516832d71e25491ceb9b37b16c23
+
+      - name: Build lightweight package
+        shell: powershell
+        run: .\package-release.ps1 -Version 0.1.0
+
+      - name: Create GitHub Release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = 'dist\DevSpaceQuickTunnelTray-v0.1.0-win-x64.zip'
+          $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash
+          @"
+          First public release of DevSpace Quick Tunnel Tray.
+
+          This project builds on @waishnav/devspace and adds a lightweight Windows tray launcher plus Cloudflare Tunnel configuration for exposing a local DevSpace MCP endpoint to the ChatGPT web client.
+
+          ## Download
+
+          - `DevSpaceQuickTunnelTray-v0.1.0-win-x64.zip` — lightweight Windows x64 package
+          - SHA256: `$sha`
+
+          ## First run
+
+          After extracting the ZIP, run:
+
+          ```powershell
+          powershell -ExecutionPolicy Bypass -File .\setup-runtime.ps1
+          ```
+
+          Wait for `Runtime ready.`, then start `DevSpaceQuickTunnelTray.exe`.
+
+          The lightweight package intentionally does not bundle Node.js, cloudflared, `node_modules`, machine-specific settings, credentials, logs, or tunnel identifiers.
+
+          ## Security
+
+          Current audit status: **PASS WITH KNOWN UPSTREAM RISK**. The reviewed findings are in the Pi subagent dependency path, and this release forces `DEVSPACE_SUBAGENTS=0`. See `SECURITY_AUDIT.md` in the package/repository for details.
+
+          License: MIT.
+          "@ | Set-Content -Path release-notes.md -Encoding UTF8
+          gh release create v0.1.0 $zip --repo $env:GITHUB_REPOSITORY --target 54f501845ff0516832d71e25491ceb9b37b16c23 --title 'v0.1.0' --notes-file release-notes.md
