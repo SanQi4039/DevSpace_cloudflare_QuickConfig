@@ -3,6 +3,6 @@
   "name": "devspace-quick-tunnel-tray-runtime",
   "version": "0.1.0",
   "dependencies": {
-    "@waishnav/devspace": "^1.0.8"
+    "@waishnav/devspace": "1.0.8"
   }
 }
