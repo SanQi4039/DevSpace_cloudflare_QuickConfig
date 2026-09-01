@@ -6,6 +6,7 @@ on:
       - ai/tunnel-config-guard-20260901
     paths:
       - .github/workflows/apply-tunnel-config-guard.yml
+      - .cloud-edit.ps1
 
 permissions:
   contents: write
@@ -20,18 +21,17 @@ jobs:
           ref: ai/tunnel-config-guard-20260901
           fetch-depth: 0
 
-      - name: Preserve patch and switch to main
+      - name: Preserve edit script and switch to main
         shell: powershell
         run: |
-          Copy-Item .cloud-edit.patch $env:RUNNER_TEMP\cloud-edit.patch
+          Copy-Item .cloud-edit.ps1 $env:RUNNER_TEMP\cloud-edit.ps1
           git fetch origin main
           git checkout -B publish origin/main
 
       - name: Apply requested changes
         shell: powershell
         run: |
-          git apply --check $env:RUNNER_TEMP\cloud-edit.patch
-          git apply $env:RUNNER_TEMP\cloud-edit.patch
+          & $env:RUNNER_TEMP\cloud-edit.ps1
           git diff --check
 
       - name: Build on GitHub Windows runner
@@ -40,9 +40,20 @@ jobs:
           .\build.ps1
           if (-not (Test-Path .\DevSpaceQuickTunnelTray.exe)) { throw 'Build output missing.' }
 
-      - name: Verify change boundary
+      - name: Verify strict guard content and change boundary
         shell: powershell
         run: |
+          $source = Get-Content .\DevSpaceQuickTunnelTray.cs -Raw
+          foreach ($required in @(
+            'TunnelMode = string.Empty',
+            'ValidateStartupPrerequisites',
+            'CloudflaredServiceManager.IsServiceRunning',
+            'SetState("启动已阻止"',
+            'ControlCloudflareService("start", "启动", false, RestartTunnel)',
+            '任一条件不满足都不会启动'
+          )) {
+            if (-not $source.Contains($required)) { throw "Strict guard marker missing: $required" }
+          }
           $changed = @(git diff --name-only)
           $expected = @('DevSpaceQuickTunnelTray.cs','README.md','settings.example.json')
           $unexpected = @($changed | Where-Object { $_ -notin $expected })
@@ -57,5 +68,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add DevSpaceQuickTunnelTray.cs README.md settings.example.json
-          git commit -m 'Require explicit Cloudflare tunnel configuration'
+          git commit -m 'Require strict Cloudflare tunnel configuration'
           git push origin HEAD:main
