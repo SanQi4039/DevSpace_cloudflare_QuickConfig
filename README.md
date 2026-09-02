@@ -13,7 +13,7 @@ This repository is the clean/public source tree. It intentionally excludes machi
 - starts and supervises DevSpace;
 - supports Cloudflare Quick Tunnel, Named Tunnel, and an existing cloudflared Windows Service;
 - restricts DevSpace to a user-selected workspace root;
-- supports `minimal`, `full`, and `codex` DevSpace tool modes;
+- defaults ChatGPT Web connections to the `minimal` DevSpace tool mode, while still supporting `full` and the experimental `codex` mode;
 - stores the DevSpace owner token outside this repository in `%USERPROFILE%\.devspace` with restricted Windows ACLs;
 - keeps DevSpace subagents disabled in this release because of the audited upstream dependency risk;
 - optionally registers Windows login autostart only when the user enables it;
@@ -60,11 +60,19 @@ This is substantially larger and should be used only when the target machine can
 
 1. Start `DevSpaceQuickTunnelTray.exe`.
 2. Complete the settings dialog. A fresh install has no default Tunnel mode.
-3. Select an existing workspace root, `minimal` / `full` / `codex` tool mode, and a valid local port.
+3. Select an existing workspace root, keep `minimal` for normal ChatGPT Web use, and choose a valid local port. `full` is optional; `codex` is experimental and changes the exposed MCP tool schema.
 4. Explicitly select `Quick`, `Named`, or `Service` and satisfy every requirement for that mode.
 5. Only after the full preflight passes will the tray start DevSpace and Cloudflare connectivity.
 6. Copy the displayed MCP URL into ChatGPT.
 7. Copy the Owner password when the MCP authorization page requests it.
+
+### Tool mode compatibility
+
+For ChatGPT Web, `minimal` is the default and recommended mode. It exposes the standard DevSpace file tools plus `bash`. `full` keeps that standard shell surface and adds dedicated inspection tools.
+
+`codex` is a different, experimental tool surface. It replaces the standard mutation/shell tools with `apply_patch`, `exec_command`, and `write_stdin`. Because MCP clients can cache the tool schema for an existing connector connection or conversation, changing between `minimal`/`full` and `codex` can leave the client trying to call a tool that the newly started backend no longer exposes. A typical symptom is ChatGPT trying to call `bash` while the backend is running in `codex` mode.
+
+This is a connection/tool-schema mismatch, not a broken installation. After changing Tool mode, restart the tray/backend, refresh or reconnect the ChatGPT MCP connection, and start a new conversation if the old conversation still exposes the previous tool list. Reinstallation is not required.
 
 ### Strict startup gate
 
