@@ -2034,11 +2034,13 @@ namespace DevSpaceQuickTunnelTray
         private readonly CheckBox autoStartBox;
         private readonly Label tunnelGuideLabel;
         private readonly Label validationLabel;
+        private readonly string initialToolMode;
 
         public AppSettings Value { get; private set; }
 
         public SettingsForm(AppSettings current)
         {
+            initialToolMode = (current.ToolMode ?? "minimal").ToLowerInvariant();
             Text = "DevSpace Quick Tunnel 设置";
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -2060,13 +2062,13 @@ namespace DevSpaceQuickTunnelTray
                 }
             });
 
-            AddLabel("Tool mode", 86);
+            AddLabel("Tool mode（ChatGPT 推荐 minimal）", 86);
             toolModeBox = new ComboBox();
             toolModeBox.Location = new Point(20, 108);
             toolModeBox.Size = new Size(220, 25);
             toolModeBox.DropDownStyle = ComboBoxStyle.DropDownList;
             toolModeBox.Items.AddRange(new object[] { "minimal", "full", "codex" });
-            toolModeBox.SelectedItem = (current.ToolMode ?? "minimal").ToLowerInvariant();
+            toolModeBox.SelectedItem = initialToolMode;
             Controls.Add(toolModeBox);
 
             AddLabel("本地端口", 86, 270);
@@ -2260,6 +2262,32 @@ namespace DevSpaceQuickTunnelTray
             {
                 validationLabel.Text = error;
                 return;
+            }
+
+            if (!string.Equals(
+                    initialToolMode,
+                    candidate.ToolMode,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                var codexTransition =
+                    string.Equals(initialToolMode, "codex", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(candidate.ToolMode, "codex", StringComparison.OrdinalIgnoreCase);
+                var warning = codexTransition
+                    ? "切换 Tool mode 会更换 DevSpace 暴露给 ChatGPT 的 MCP 工具集合。\r\n\r\n" +
+                      "minimal/full 使用 bash 等标准工具；codex 使用 apply_patch、exec_command、write_stdin，并隐藏原工具。\r\n\r\n" +
+                      "已有 ChatGPT 连接或旧对话可能缓存之前的工具列表。保存并重启后，请刷新/重新连接 MCP；如果旧对话仍显示旧工具，请新建对话。无需重装。"
+                    : "切换 Tool mode 会改变 DevSpace 暴露给 ChatGPT 的 MCP 工具集合。\r\n\r\n" +
+                      "保存并重启后，建议刷新/重新连接 MCP；如果旧对话仍显示旧工具，请新建对话。无需重装。";
+                var result = MessageBox.Show(
+                    warning + "\r\n\r\n是否保存此 Tool mode 变更？",
+                    "Tool mode 变更提示",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+                if (result != DialogResult.Yes)
+                {
+                    return;
+                }
             }
             Value = candidate;
             DialogResult = DialogResult.OK;
