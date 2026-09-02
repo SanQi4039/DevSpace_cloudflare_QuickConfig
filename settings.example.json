@@ -1,7 +1,7 @@
 {
   "SchemaVersion": 1,
   "WorkspaceRoot": "C:\\path\\to\\your\\workspace",
-  "ToolMode": "codex",
+  "ToolMode": "minimal",
   "LocalPort": 7676,
   "TunnelMode": "",
   "FixedHostname": "",
