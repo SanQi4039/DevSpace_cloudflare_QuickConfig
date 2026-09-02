@@ -9,7 +9,6 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Security.AccessControl;
 using System.Security.Principal;
-using System.ServiceProcess;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -33,13 +32,6 @@ namespace DevSpaceQuickTunnelTray
         [STAThread]
         private static void Main(string[] args)
         {
-            if (args != null && args.Length == 2 &&
-                string.Equals(args[0], "--service-action", StringComparison.OrdinalIgnoreCase))
-            {
-                Environment.ExitCode = CloudflaredServiceManager.Execute(args[1]);
-                return;
-            }
-
             bool createdNew;
             using (var mutex = new Mutex(true, @"Local\DevSpaceQuickTunnelTray", out createdNew))
             {
@@ -60,150 +52,24 @@ namespace DevSpaceQuickTunnelTray
         }
     }
 
-    internal static class CloudflaredServiceManager
+    internal static class AppVisuals
     {
-        private const string ServiceName = "cloudflared";
-
-        public static string QueryStatus()
+        public static Icon CreateApplicationIcon()
         {
             try
             {
-                using (var controller = new ServiceController(ServiceName))
+                var extracted = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (extracted != null)
                 {
-                    return TranslateStatus(controller.Status);
+                    return new Icon(extracted, new Size(32, 32));
                 }
-            }
-            catch (InvalidOperationException)
-            {
-                return "未安装或不可读取";
-            }
-            catch (Exception exception)
-            {
-                return "查询失败：" + exception.Message;
-            }
-        }
-
-        public static bool CanUseService(out string error)
-        {
-            error = string.Empty;
-            try
-            {
-                using (var controller = new ServiceController(ServiceName))
-                {
-                    var ignored = controller.Status;
-                    return true;
-                }
-            }
-            catch (InvalidOperationException)
-            {
-                error = "未安装 cloudflared Windows Service，或当前用户无法读取该服务。";
-                return false;
-            }
-            catch (Exception exception)
-            {
-                error = "无法读取 cloudflared Windows Service：" + exception.Message;
-                return false;
-            }
-        }
-
-        public static bool IsServiceRunning(out string error)
-        {
-            error = string.Empty;
-            try
-            {
-                using (var controller = new ServiceController(ServiceName))
-                {
-                    controller.Refresh();
-                    if (controller.Status == ServiceControllerStatus.Running)
-                    {
-                        return true;
-                    }
-                    error = "cloudflared Windows Service 当前状态不是 Running：" + TranslateStatus(controller.Status) + "。";
-                    return false;
-                }
-            }
-            catch (InvalidOperationException)
-            {
-                error = "未安装 cloudflared Windows Service，或当前用户无法读取该服务。";
-                return false;
-            }
-            catch (Exception exception)
-            {
-                error = "无法读取 cloudflared Windows Service：" + exception.Message;
-                return false;
-            }
-        }
-
-        public static int Execute(string action)
-        {
-            try
-            {
-                using (var controller = new ServiceController(ServiceName))
-                {
-                    controller.Refresh();
-                    if (controller.Status == ServiceControllerStatus.StartPending)
-                    {
-                        controller.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(20));
-                        controller.Refresh();
-                    }
-                    else if (controller.Status == ServiceControllerStatus.StopPending)
-                    {
-                        controller.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(20));
-                        controller.Refresh();
-                    }
-
-                    if (string.Equals(action, "start", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (controller.Status != ServiceControllerStatus.Running)
-                        {
-                            controller.Start();
-                            controller.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(20));
-                        }
-                    }
-                    else if (string.Equals(action, "stop", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (controller.Status != ServiceControllerStatus.Stopped)
-                        {
-                            controller.Stop();
-                            controller.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(20));
-                        }
-                    }
-                    else if (string.Equals(action, "restart", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (controller.Status != ServiceControllerStatus.Stopped)
-                        {
-                            controller.Stop();
-                            controller.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(20));
-                        }
-                        controller.Start();
-                        controller.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(20));
-                    }
-                    else
-                    {
-                        return 2;
-                    }
-                }
-                return 0;
             }
             catch
             {
-                return 1;
+                // Fall back to a valid Windows icon if the executable icon
+                // cannot be read for any reason.
             }
-        }
-
-        private static string TranslateStatus(ServiceControllerStatus status)
-        {
-            switch (status)
-            {
-                case ServiceControllerStatus.Running: return "运行中";
-                case ServiceControllerStatus.Stopped: return "已停止";
-                case ServiceControllerStatus.StartPending: return "正在启动";
-                case ServiceControllerStatus.StopPending: return "正在停止";
-                case ServiceControllerStatus.Paused: return "已暂停";
-                case ServiceControllerStatus.PausePending: return "正在暂停";
-                case ServiceControllerStatus.ContinuePending: return "正在恢复";
-                default: return status.ToString();
-            }
+            return (Icon)SystemIcons.Application.Clone();
         }
     }
 
@@ -259,15 +125,6 @@ namespace DevSpaceQuickTunnelTray
             get { return string.Equals(TunnelMode, "Named", StringComparison.OrdinalIgnoreCase); }
         }
 
-        public bool IsServiceTunnel
-        {
-            get { return string.Equals(TunnelMode, "Service", StringComparison.OrdinalIgnoreCase); }
-        }
-
-        public bool HasFixedHostname
-        {
-            get { return IsNamedTunnel || IsServiceTunnel; }
-        }
     }
 
     internal sealed class TunnelApplicationContext : ApplicationContext
@@ -289,13 +146,10 @@ namespace DevSpaceQuickTunnelTray
         private string detailText = "";
         private string backendStatus = "等待启动";
         private string ownerToken = string.Empty;
-        private string cloudflareServiceStatus = "未检查";
-        private DateTime lastCloudflareServiceCheckUtc = DateTime.MinValue;
         private bool exiting;
         private bool restarting;
         private bool balloonShownForCurrentUrl;
         private bool namedTunnelStartRequested;
-        private bool serviceOperationInProgress;
         private volatile bool backendRestartRequested;
         private DateTime backendStartedUtc = DateTime.MinValue;
         private AppSettings settings;
@@ -333,12 +187,6 @@ namespace DevSpaceQuickTunnelTray
             menu.Items.Add("复制 DevSpace 更新命令", null, delegate { CopyDevSpaceCommand(); });
             menu.Items.Add("复制 Owner password", null, delegate { CopyOwnerToken(); });
             menu.Items.Add(new ToolStripSeparator());
-            var cloudflareMenu = new ToolStripMenuItem("Cloudflare 服务");
-            cloudflareMenu.DropDownItems.Add("查看状态", null, delegate { ShowCloudflareServiceStatus(); });
-            cloudflareMenu.DropDownItems.Add("启动服务", null, delegate { StartCloudflareService(); });
-            cloudflareMenu.DropDownItems.Add("停止服务", null, delegate { StopCloudflareService(); });
-            cloudflareMenu.DropDownItems.Add("重启服务", null, delegate { RestartCloudflareService(); });
-            menu.Items.Add(cloudflareMenu);
             menu.Items.Add("重新启动全部", null, delegate { RestartAll(); });
             menu.Items.Add("退出托盘程序", null, delegate { ConfirmExit(); });
 
@@ -346,7 +194,7 @@ namespace DevSpaceQuickTunnelTray
             menu.Items.Add("设置...", null, delegate { ShowSettingsDialog(true); });
 
             trayIcon = new NotifyIcon();
-            trayIcon.Icon = SystemIcons.Application;
+            trayIcon.Icon = AppVisuals.CreateApplicationIcon();
             trayIcon.Text = "DevSpace Quick Tunnel";
             trayIcon.ContextMenuStrip = menu;
             trayIcon.Visible = true;
@@ -499,10 +347,9 @@ namespace DevSpaceQuickTunnelTray
                 return false;
             }
             if (!string.Equals(value.TunnelMode, "Quick", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(value.TunnelMode, "Named", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(value.TunnelMode, "Service", StringComparison.OrdinalIgnoreCase))
+                !string.Equals(value.TunnelMode, "Named", StringComparison.OrdinalIgnoreCase))
             {
-                error = "请选择 Tunnel 模式：Quick、Named 或 Service。程序不会默认选择。";
+                error = "请选择 Tunnel 模式：Quick 或 Named。程序不会默认选择。";
                 return false;
             }
             if (ContainsUnsafeArgumentText(value.WorkspaceRoot) ||
@@ -513,7 +360,7 @@ namespace DevSpaceQuickTunnelTray
                 error = "设置中不能包含引号、换行符或 NUL 字符。";
                 return false;
             }
-            if (value.HasFixedHostname)
+            if (value.IsNamedTunnel)
             {
                 if (string.IsNullOrWhiteSpace(value.FixedHostname) ||
                     !Regex.IsMatch(value.FixedHostname.Trim(),
@@ -540,15 +387,6 @@ namespace DevSpaceQuickTunnelTray
                     !File.Exists(value.CloudflaredConfigPath))
                 {
                     error = "cloudflared config 文件不存在。";
-                    return false;
-                }
-            }
-            if (value.IsServiceTunnel)
-            {
-                string serviceError;
-                if (!CloudflaredServiceManager.CanUseService(out serviceError))
-                {
-                    error = serviceError;
                     return false;
                 }
             }
@@ -617,7 +455,7 @@ namespace DevSpaceQuickTunnelTray
                 return false;
             }
 
-            if (!settings.IsServiceTunnel && !File.Exists(CloudflaredPath))
+            if (!File.Exists(CloudflaredPath))
             {
                 error = "未找到 cloudflared.exe。请先运行 setup-runtime.ps1，所有运行时条件满足后程序才会启动。";
                 return false;
@@ -657,16 +495,6 @@ namespace DevSpaceQuickTunnelTray
                 return false;
             }
 
-            if (settings.IsServiceTunnel)
-            {
-                string serviceError;
-                if (!CloudflaredServiceManager.IsServiceRunning(out serviceError))
-                {
-                    error = serviceError + " Service 模式不会先启动 DevSpace；请先启动 cloudflared 服务。";
-                    return false;
-                }
-            }
-
             error = string.Empty;
             return true;
         }
@@ -681,12 +509,8 @@ namespace DevSpaceQuickTunnelTray
             }
 
             namedTunnelStartRequested = false;
-            if (settings.HasFixedHostname)
+            if (settings.IsNamedTunnel)
             {
-                if (settings.IsServiceTunnel)
-                {
-                    RefreshCloudflareServiceStatus(true);
-                }
                 try
                 {
                     if (processJob == null)
@@ -701,9 +525,7 @@ namespace DevSpaceQuickTunnelTray
                 }
 
                 var publicBaseUrl = "https://" + settings.FixedHostname.Trim().TrimEnd('/');
-                var detail = settings.IsServiceTunnel
-                    ? "Cloudflare Windows 服务（由系统独立运行）"
-                    : "Named Tunnel: " + settings.NamedTunnelIdOrName;
+                var detail = "Named Tunnel: " + settings.NamedTunnelIdOrName;
                 SetState("正在启动 DevSpace", detail, publicBaseUrl);
                 ConfigureAndStartDevSpace(publicBaseUrl);
                 return;
@@ -1401,7 +1223,6 @@ namespace DevSpaceQuickTunnelTray
                 RestartDevSpaceBackend("后端进程退出");
             }
 
-            RefreshCloudflareServiceStatus(false);
             if (settings.IsNamedTunnel &&
                 !namedTunnelStartRequested &&
                 tunnelProcess == null &&
@@ -1436,9 +1257,7 @@ namespace DevSpaceQuickTunnelTray
             }
 
             var devSpaceReady = backend.StartsWith("运行中", StringComparison.OrdinalIgnoreCase);
-            var serviceReady = !settings.IsServiceTunnel ||
-                string.Equals(cloudflareServiceStatus, "运行中", StringComparison.OrdinalIgnoreCase);
-            var connectionReady = url.Length > 0 && devSpaceReady && serviceReady;
+            var connectionReady = url.Length > 0 && devSpaceReady;
 
             trayIcon.Text = connectionReady
                 ? "DevSpace Quick Tunnel - 已连接"
@@ -1452,9 +1271,11 @@ namespace DevSpaceQuickTunnelTray
                     url,
                     backend,
                     token,
-                    settings.IsServiceTunnel
-                        ? cloudflareServiceStatus
-                        : "由托盘进程管理");
+                    settings.WorkspaceRoot,
+                    settings.ToolMode,
+                    settings.TunnelMode,
+                    settings.LocalPort,
+                    "由托盘进程管理");
             }
 
             if (connectionReady &&
@@ -1465,9 +1286,7 @@ namespace DevSpaceQuickTunnelTray
                 balloonShownForCurrentUrl = true;
                 trayIcon.ShowBalloonTip(
                     5000,
-                    settings.IsServiceTunnel
-                        ? "DevSpace 固定地址已就绪"
-                        : (settings.IsNamedTunnel ? "Named Tunnel 已连接" : "临时隧道已就绪"),
+                    settings.IsNamedTunnel ? "Named Tunnel 已连接" : "临时隧道已就绪",
                     "MCP 地址：" + url + "/mcp",
                     ToolTipIcon.Info);
             }
@@ -1490,6 +1309,7 @@ namespace DevSpaceQuickTunnelTray
                     CopyMcpUrl,
                     CopyDevSpaceCommand,
                     CopyOwnerToken,
+                    delegate { ShowSettingsDialog(true); },
                     RestartAll,
                     HideStatusWindow);
             }
@@ -1603,203 +1423,8 @@ namespace DevSpaceQuickTunnelTray
             }
         }
 
-        private void RefreshCloudflareServiceStatus(bool force)
-        {
-            if (!settings.IsServiceTunnel)
-            {
-                cloudflareServiceStatus = "当前不是 Service 模式";
-                return;
-            }
-
-            if (!force && DateTime.UtcNow - lastCloudflareServiceCheckUtc < TimeSpan.FromSeconds(3))
-            {
-                return;
-            }
-
-            cloudflareServiceStatus = CloudflaredServiceManager.QueryStatus();
-            lastCloudflareServiceCheckUtc = DateTime.UtcNow;
-        }
-
-        private bool EnsureServiceMode()
-        {
-            if (settings.IsServiceTunnel)
-            {
-                return true;
-            }
-
-            MessageBox.Show(
-                "Cloudflare Windows 服务管理只用于 Service 模式。\r\n当前模式：" + settings.TunnelMode,
-                "DevSpace Quick Tunnel",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-            return false;
-        }
-
-        private void ShowCloudflareServiceStatus()
-        {
-            if (!EnsureServiceMode())
-            {
-                return;
-            }
-
-            RefreshCloudflareServiceStatus(true);
-            MessageBox.Show(
-                "Cloudflare 服务：" + cloudflareServiceStatus +
-                "\r\n固定域名：https://" + settings.FixedHostname.Trim() +
-                "\r\n本地目标：http://127.0.0.1:" + settings.LocalPort,
-                "Cloudflare 服务状态",
-                MessageBoxButtons.OK,
-                string.Equals(cloudflareServiceStatus, "运行中", StringComparison.OrdinalIgnoreCase)
-                    ? MessageBoxIcon.Information
-                    : MessageBoxIcon.Warning);
-        }
-
-        private void StartCloudflareService()
-        {
-            ControlCloudflareService("start", "启动", false, RestartTunnel);
-        }
-
-        private void StopCloudflareService()
-        {
-            ControlCloudflareService("stop", "停止", true, null);
-        }
-
-        private void RestartCloudflareService()
-        {
-            ControlCloudflareService("restart", "重启", true, null);
-        }
-
-        private void ControlCloudflareService(
-            string action,
-            string actionLabel,
-            bool confirm,
-            Action successAction)
-        {
-            if (!EnsureServiceMode())
-            {
-                return;
-            }
-
-            if (serviceOperationInProgress)
-            {
-                MessageBox.Show(
-                    "另一个 Cloudflare 服务操作正在进行，请等待完成。",
-                    "Cloudflare 服务",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-                return;
-            }
-
-            if (confirm)
-            {
-                var result = MessageBox.Show(
-                    actionLabel + " Cloudflare 服务会暂时中断网页 ChatGPT 的 MCP 连接。是否继续？",
-                    "确认" + actionLabel + " Cloudflare 服务",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Warning,
-                    MessageBoxDefaultButton.Button2);
-                if (result != DialogResult.Yes)
-                {
-                    return;
-                }
-            }
-
-            Process process;
-            try
-            {
-                var startInfo = new ProcessStartInfo();
-                startInfo.FileName = Application.ExecutablePath;
-                startInfo.Arguments = "--service-action " + action;
-                startInfo.UseShellExecute = true;
-                startInfo.Verb = "runas";
-                startInfo.WindowStyle = ProcessWindowStyle.Hidden;
-                process = Process.Start(startInfo);
-                if (process == null)
-                {
-                    throw new InvalidOperationException("未能创建提权服务操作进程。");
-                }
-            }
-            catch (Win32Exception exception)
-            {
-                var message = exception.NativeErrorCode == 1223
-                    ? "操作已取消，Cloudflare 服务没有改变。"
-                    : "无法" + actionLabel + " Cloudflare 服务：" + exception.Message;
-                MessageBox.Show(
-                    message,
-                    "Cloudflare 服务",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-                return;
-            }
-            catch (Exception exception)
-            {
-                MessageBox.Show(
-                    "无法" + actionLabel + " Cloudflare 服务：" + exception.Message,
-                    "Cloudflare 服务",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-                return;
-            }
-
-            serviceOperationInProgress = true;
-            var uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
-            ThreadPool.QueueUserWorkItem(delegate
-            {
-                string error = null;
-                try
-                {
-                    process.WaitForExit();
-                    if (process.ExitCode != 0)
-                    {
-                        error = "服务操作失败，退出代码：" + process.ExitCode;
-                    }
-                }
-                catch (Exception exception)
-                {
-                    error = exception.Message;
-                }
-                finally
-                {
-                    process.Dispose();
-                }
-
-                uiContext.Post(delegate
-                {
-                    serviceOperationInProgress = false;
-                    lastCloudflareServiceCheckUtc = DateTime.MinValue;
-                    RefreshCloudflareServiceStatus(true);
-                    RefreshUi();
-
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        MessageBox.Show(
-                            "无法" + actionLabel + " Cloudflare 服务：" + error,
-                            "Cloudflare 服务",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Warning);
-                        return;
-                    }
-
-                    trayIcon.ShowBalloonTip(
-                        2500,
-                        "Cloudflare 服务已" + actionLabel,
-                        "当前状态：" + cloudflareServiceStatus,
-                        ToolTipIcon.Info);
-                    if (successAction != null)
-                    {
-                        successAction();
-                    }
-                }, null);
-            });
-        }
-
         private void RestartAll()
         {
-            if (settings.IsServiceTunnel)
-            {
-                ControlCloudflareService("restart", "重启", true, RestartTunnel);
-                return;
-            }
             RestartTunnel();
         }
 
@@ -1873,11 +1498,8 @@ namespace DevSpaceQuickTunnelTray
 
         private void ConfirmExit()
         {
-            var message = settings.IsServiceTunnel
-                ? "退出托盘程序并停止 DevSpace 后端？Cloudflare Windows 服务不会停止。"
-                : "退出程序并停止它启动的 DevSpace 与隧道进程？";
             var result = MessageBox.Show(
-                message,
+                "退出程序并停止它启动的 DevSpace 与隧道进程？",
                 "DevSpace Quick Tunnel",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question,
@@ -2034,12 +1656,15 @@ namespace DevSpaceQuickTunnelTray
         private readonly CheckBox autoStartBox;
         private readonly Label tunnelGuideLabel;
         private readonly Label validationLabel;
+        private readonly string initialToolMode;
 
         public AppSettings Value { get; private set; }
 
         public SettingsForm(AppSettings current)
         {
+            initialToolMode = (current.ToolMode ?? "minimal").ToLowerInvariant();
             Text = "DevSpace Quick Tunnel 设置";
+            Icon = AppVisuals.CreateApplicationIcon();
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -2060,13 +1685,13 @@ namespace DevSpaceQuickTunnelTray
                 }
             });
 
-            AddLabel("Tool mode", 86);
+            AddLabel("Tool mode（ChatGPT 推荐 minimal）", 86);
             toolModeBox = new ComboBox();
             toolModeBox.Location = new Point(20, 108);
             toolModeBox.Size = new Size(220, 25);
             toolModeBox.DropDownStyle = ComboBoxStyle.DropDownList;
             toolModeBox.Items.AddRange(new object[] { "minimal", "full", "codex" });
-            toolModeBox.SelectedItem = (current.ToolMode ?? "minimal").ToLowerInvariant();
+            toolModeBox.SelectedItem = initialToolMode;
             Controls.Add(toolModeBox);
 
             AddLabel("本地端口", 86, 270);
@@ -2083,12 +1708,8 @@ namespace DevSpaceQuickTunnelTray
             tunnelModeBox.Location = new Point(440, 108);
             tunnelModeBox.Size = new Size(220, 25);
             tunnelModeBox.DropDownStyle = ComboBoxStyle.DropDownList;
-            tunnelModeBox.Items.AddRange(new object[] { "Quick", "Named", "Service" });
-            if (current.IsServiceTunnel)
-            {
-                tunnelModeBox.SelectedItem = "Service";
-            }
-            else if (current.IsNamedTunnel)
+            tunnelModeBox.Items.AddRange(new object[] { "Quick", "Named" });
+            if (current.IsNamedTunnel)
             {
                 tunnelModeBox.SelectedItem = "Named";
             }
@@ -2210,11 +1831,7 @@ namespace DevSpaceQuickTunnelTray
                 mode,
                 "Named",
                 StringComparison.OrdinalIgnoreCase);
-            var hostnameEnabled = namedEnabled || string.Equals(
-                mode,
-                "Service",
-                StringComparison.OrdinalIgnoreCase);
-            hostnameBox.Enabled = hostnameEnabled;
+            hostnameBox.Enabled = namedEnabled;
             tunnelIdBox.Enabled = namedEnabled;
             credentialsBox.Enabled = namedEnabled;
             configBox.Enabled = namedEnabled;
@@ -2224,10 +1841,6 @@ namespace DevSpaceQuickTunnelTray
             if (namedEnabled)
             {
                 tunnelGuideLabel.Text = "Named：固定域名。必须同时具备 hostname、Tunnel UUID/名称、credentials JSON、cloudflared config YAML、cloudflared.exe 和 DevSpace 运行时；任一条件不满足都会阻止保存或启动。";
-            }
-            else if (string.Equals(mode, "Service", StringComparison.OrdinalIgnoreCase))
-            {
-                tunnelGuideLabel.Text = "Service：固定域名。必须填写 hostname，且 cloudflared Windows Service 必须已安装、可读取并处于 Running；Service 自身负责 UUID/credentials/ingress。任一条件不满足都不会启动 DevSpace。";
             }
             else if (string.Equals(mode, "Quick", StringComparison.OrdinalIgnoreCase))
             {
@@ -2261,6 +1874,32 @@ namespace DevSpaceQuickTunnelTray
                 validationLabel.Text = error;
                 return;
             }
+
+            if (!string.Equals(
+                    initialToolMode,
+                    candidate.ToolMode,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                var codexTransition =
+                    string.Equals(initialToolMode, "codex", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(candidate.ToolMode, "codex", StringComparison.OrdinalIgnoreCase);
+                var warning = codexTransition
+                    ? "切换 Tool mode 会更换 DevSpace 暴露给 ChatGPT 的 MCP 工具集合。\r\n\r\n" +
+                      "minimal/full 使用 bash 等标准工具；codex 使用 apply_patch、exec_command、write_stdin，并隐藏原工具。\r\n\r\n" +
+                      "已有 ChatGPT 连接或旧对话可能缓存之前的工具列表。保存并重启后，请刷新/重新连接 MCP；如果旧对话仍显示旧工具，请新建对话。无需重装。"
+                    : "切换 Tool mode 会改变 DevSpace 暴露给 ChatGPT 的 MCP 工具集合。\r\n\r\n" +
+                      "保存并重启后，建议刷新/重新连接 MCP；如果旧对话仍显示旧工具，请新建对话。无需重装。";
+                var result = MessageBox.Show(
+                    warning + "\r\n\r\n是否保存此 Tool mode 变更？",
+                    "Tool mode 变更提示",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+                if (result != DialogResult.Yes)
+                {
+                    return;
+                }
+            }
             Value = candidate;
             DialogResult = DialogResult.OK;
             Close();
@@ -2275,6 +1914,7 @@ namespace DevSpaceQuickTunnelTray
         private readonly TextBox mcpUrlBox;
         private readonly TextBox commandBox;
         private readonly TextBox ownerTokenBox;
+        private readonly Label configSummaryLabel;
         private readonly Action hideAction;
         private bool allowClose;
 
@@ -2282,16 +1922,18 @@ namespace DevSpaceQuickTunnelTray
             Action copyMcpUrl,
             Action copyCommand,
             Action copyOwnerToken,
+            Action openSettings,
             Action restartTunnel,
             Action hideWindow)
         {
             hideAction = hideWindow;
             Text = "DevSpace 远程连接";
+            Icon = AppVisuals.CreateApplicationIcon();
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = true;
-            ClientSize = new Size(720, 425);
+            ClientSize = new Size(760, 495);
             Font = new Font("Microsoft YaHei UI", 9F);
 
             statusLabel = new Label();
@@ -2302,35 +1944,46 @@ namespace DevSpaceQuickTunnelTray
 
             detailLabel = new Label();
             detailLabel.Location = new Point(20, 45);
-            detailLabel.Size = new Size(680, 36);
+            detailLabel.Size = new Size(720, 36);
             detailLabel.ForeColor = Color.DimGray;
 
-            tunnelUrlBox = AddReadOnlyField("公网地址", 88);
-            mcpUrlBox = AddReadOnlyField("ChatGPT / MCP 中填写", 146);
-            commandBox = AddReadOnlyField("更新 DevSpace 地址的命令", 204);
-            ownerTokenBox = AddReadOnlyField("Owner password（已隐藏，请使用复制按钮）", 262);
+            configSummaryLabel = new Label();
+            configSummaryLabel.Location = new Point(20, 86);
+            configSummaryLabel.Size = new Size(600, 58);
+            configSummaryLabel.BorderStyle = BorderStyle.FixedSingle;
+            configSummaryLabel.Padding = new Padding(8, 5, 8, 5);
+            configSummaryLabel.ForeColor = Color.DimGray;
+            Controls.Add(configSummaryLabel);
+
+            var settingsButton = AddButton("设置...", 630, 98, 110);
+            settingsButton.Click += delegate { openSettings(); };
+
+            tunnelUrlBox = AddReadOnlyField("公网地址", 154);
+            mcpUrlBox = AddReadOnlyField("ChatGPT / MCP 中填写", 212);
+            commandBox = AddReadOnlyField("更新 DevSpace 地址的命令", 270);
+            ownerTokenBox = AddReadOnlyField("Owner password（已隐藏，请使用复制按钮）", 328);
             ownerTokenBox.UseSystemPasswordChar = true;
 
-            var copyMcpButton = AddButton("复制 MCP 地址", 20, 328, 125);
+            var copyMcpButton = AddButton("复制 MCP 地址", 20, 394, 125);
             copyMcpButton.Click += delegate { copyMcpUrl(); };
 
-            var copyCommandButton = AddButton("复制更新命令", 155, 328, 125);
+            var copyCommandButton = AddButton("复制更新命令", 155, 394, 125);
             copyCommandButton.Click += delegate { copyCommand(); };
 
-            var copyOwnerButton = AddButton("复制 Owner 密码", 290, 328, 140);
+            var copyOwnerButton = AddButton("复制 Owner 密码", 290, 394, 140);
             copyOwnerButton.Click += delegate { copyOwnerToken(); };
 
-            var restartButton = AddButton("重新启动全部", 440, 328, 120);
+            var restartButton = AddButton("重新启动全部", 440, 394, 120);
             restartButton.Click += delegate { restartTunnel(); };
 
-            var hideButton = AddButton("隐藏到托盘", 570, 328, 130);
+            var hideButton = AddButton("隐藏到托盘", 570, 394, 130);
             hideButton.Click += delegate { hideAction(); };
 
             var note = new Label();
-            note.Location = new Point(20, 373);
-            note.Size = new Size(680, 42);
+            note.Location = new Point(20, 439);
+            note.Size = new Size(720, 42);
             note.ForeColor = Color.DimGray;
-            note.Text = "程序会自动初始化并启动 DevSpace，只开放你在设置中选择的工作区。\r\n网页 ChatGPT 中仍需填写上面的 MCP 地址。";
+            note.Text = "常用配置已前移到本页显示，完整配置可直接点“设置...”打开。\r\n程序只开放你在设置中选择的工作区；网页 ChatGPT 中仍需填写上面的 MCP 地址。";
             Controls.Add(note);
         }
 
@@ -2338,13 +1991,13 @@ namespace DevSpaceQuickTunnelTray
         {
             var label = new Label();
             label.Location = new Point(20, top);
-            label.Size = new Size(680, 20);
+            label.Size = new Size(720, 20);
             label.Text = labelText;
             Controls.Add(label);
 
             var box = new TextBox();
             box.Location = new Point(20, top + 22);
-            box.Size = new Size(680, 25);
+            box.Size = new Size(720, 25);
             box.ReadOnly = true;
             box.BackColor = Color.White;
             Controls.Add(box);
@@ -2367,6 +2020,10 @@ namespace DevSpaceQuickTunnelTray
             string tunnelUrl,
             string backendStatus,
             string ownerToken,
+            string workspaceRoot,
+            string toolMode,
+            string tunnelMode,
+            int localPort,
             string cloudflareStatus)
         {
             statusLabel.Text = status;
@@ -2379,6 +2036,10 @@ namespace DevSpaceQuickTunnelTray
                 ? "devspace.cmd config set publicBaseUrl \"" + tunnelUrl + "\""
                 : "等待 Cloudflare 生成地址…";
             ownerTokenBox.Text = ownerToken;
+            configSummaryLabel.Text =
+                "工作区：" + workspaceRoot + "\r\n" +
+                "Tool mode：" + toolMode + "    Tunnel：" + tunnelMode +
+                "    本地端口：" + localPort;
         }
 
         protected override void OnFormClosing(FormClosingEventArgs eventArgs)

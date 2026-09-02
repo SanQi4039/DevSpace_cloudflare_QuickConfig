@@ -6,14 +6,16 @@ This project is built on top of [`@waishnav/devspace`](https://www.npmjs.com/pac
 
 In short: **DevSpace provides the ChatGPT-web-to-local-workspace control layer; this repository provides the Windows + Cloudflare quick configuration around it.**
 
+The tray is the single process supervisor: it owns and supervises the DevSpace backend and the Cloudflare tunnel process it starts, instead of delegating either lifecycle to a separate Windows service.
+
 This repository is the clean/public source tree. It intentionally excludes machine-specific configuration, logs, prebuilt runtimes, `node_modules`, Cloudflare credentials, and local tunnel identifiers.
 
 ## What it does
 
 - starts and supervises DevSpace;
-- supports Cloudflare Quick Tunnel, Named Tunnel, and an existing cloudflared Windows Service;
+- supports Cloudflare Quick Tunnel and Named Tunnel;
 - restricts DevSpace to a user-selected workspace root;
-- supports `minimal`, `full`, and `codex` DevSpace tool modes;
+- defaults ChatGPT Web connections to the `minimal` DevSpace tool mode, while still supporting `full` and the experimental `codex` mode;
 - stores the DevSpace owner token outside this repository in `%USERPROFILE%\.devspace` with restricted Windows ACLs;
 - keeps DevSpace subagents disabled in this release because of the audited upstream dependency risk;
 - optionally registers Windows login autostart only when the user enables it;
@@ -60,11 +62,19 @@ This is substantially larger and should be used only when the target machine can
 
 1. Start `DevSpaceQuickTunnelTray.exe`.
 2. Complete the settings dialog. A fresh install has no default Tunnel mode.
-3. Select an existing workspace root, `minimal` / `full` / `codex` tool mode, and a valid local port.
-4. Explicitly select `Quick`, `Named`, or `Service` and satisfy every requirement for that mode.
+3. Select an existing workspace root, keep `minimal` for normal ChatGPT Web use, and choose a valid local port. `full` is optional; `codex` is experimental and changes the exposed MCP tool schema.
+4. Explicitly select `Quick` or `Named` and satisfy every requirement for that mode.
 5. Only after the full preflight passes will the tray start DevSpace and Cloudflare connectivity.
 6. Copy the displayed MCP URL into ChatGPT.
 7. Copy the Owner password when the MCP authorization page requests it.
+
+### Tool mode compatibility
+
+For ChatGPT Web, `minimal` is the default and recommended mode. It exposes the standard DevSpace file tools plus `bash`. `full` keeps that standard shell surface and adds dedicated inspection tools.
+
+`codex` is a different, experimental tool surface. It replaces the standard mutation/shell tools with `apply_patch`, `exec_command`, and `write_stdin`. Because MCP clients can cache the tool schema for an existing connector connection or conversation, changing between `minimal`/`full` and `codex` can leave the client trying to call a tool that the newly started backend no longer exposes. A typical symptom is ChatGPT trying to call `bash` while the backend is running in `codex` mode.
+
+This is a connection/tool-schema mismatch, not a broken installation. After changing Tool mode, restart the tray/backend, refresh or reconnect the ChatGPT MCP connection, and start a new conversation if the old conversation still exposes the previous tool list. Reinstallation is not required.
 
 ### Strict startup gate
 
@@ -83,9 +93,7 @@ Mode-specific prerequisites:
 | --- | --- | --- |
 | `Quick` | `cloudflared.exe` plus all global prerequisites | Temporary test mode only. It deliberately has no user-owned Tunnel UUID or fixed hostname; Cloudflare generates a `trycloudflare.com` URL that can change after restart. |
 | `Named` | fixed hostname, Tunnel UUID/name, existing credentials JSON, existing cloudflared YAML config, `cloudflared.exe`, plus all global prerequisites | Use this when the tray owns the fixed named tunnel process. Missing any field/file blocks saving or startup. |
-| `Service` | fixed hostname, an installed/readable `cloudflared` Windows Service, and that service must be `Running`, plus all global prerequisites | The Windows Service owns its Tunnel UUID, credentials, and ingress/config. If the service is missing or stopped, DevSpace is not started. Starting the service from the tray re-runs the full startup gate. |
-
-If you need a stable Cloudflare domain, use `Named` or `Service`; do not use `Quick`.
+If you need a stable Cloudflare domain, use `Named`; do not use `Quick`.
 
 For a typical Named Tunnel, Cloudflare must provide a Tunnel UUID/name and a DNS hostname routed to that Tunnel. Enter the hostname without `https://`, select the credentials JSON file, and select a cloudflared YAML config whose ingress target points to the local DevSpace port, for example `http://127.0.0.1:7676`.
 

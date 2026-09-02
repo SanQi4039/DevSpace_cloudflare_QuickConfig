@@ -5,14 +5,19 @@ if (-not (Test-Path $csc)) {
     throw '.NET Framework 4.x C# compiler was not found.'
 }
 
+$icon = Join-Path $PSScriptRoot 'DevSpaceQuickTunnelTray.ico'
+if (-not (Test-Path $icon)) {
+    & (Join-Path $PSScriptRoot 'make-icon.ps1')
+}
+
 & $csc /nologo /target:winexe /optimize+ `
+    /win32icon:DevSpaceQuickTunnelTray.ico `
     /reference:System.dll `
     /reference:System.Core.dll `
     /reference:System.Drawing.dll `
     /reference:System.Windows.Forms.dll `
     /reference:System.Web.Extensions.dll `
     /reference:System.Security.dll `
-    /reference:System.ServiceProcess.dll `
     /out:DevSpaceQuickTunnelTray.exe `
     DevSpaceQuickTunnelTray.cs
 
